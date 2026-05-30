@@ -27,6 +27,10 @@ def embed_columns():
 
     np.savez("embeddings.npz", **embeddings_store)
 
+    listing_ids = listings["id"].to_numpy()
+    np.save("listing_ids.npy", listing_ids)
+    print(f"Saved embeddings.npz and listing_ids.npy ({len(listing_ids):,} listings).")
+
 
 if __name__ == "__main__":
     embed_columns()
