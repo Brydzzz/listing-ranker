@@ -1,63 +1,142 @@
+import ast
+
 import pandas as pd
-import numpy as np
+from sklearn.preprocessing import MultiLabelBinarizer
+
+COLS_TO_IGNORE = [
+    "name",
+    "description",
+    "listing_url",
+    "scrape_id",
+    "last_scraped",
+    "source",
+    "picture_url",
+    "host_id",
+    "host_url",
+    "host_name",
+    "host_location",
+    "host_about",
+    "host_thumbnail_url",
+    "host_picture_url",
+    "host_neighbourhood",
+    "host_listings_count",
+    "host_total_listings_count",
+    "host_verifications",
+    "neighbourhood_cleansed",
+    "neighbourhood_group_cleansed",
+    "latitude",
+    "longitude",
+    "accommodates",
+    "bathrooms_text",
+    "minimum_nights",
+    "maximum_nights",
+    "minimum_minimum_nights",
+    "maximum_minimum_nights",
+    "minimum_maximum_nights",
+    "maximum_maximum_nights",
+    "minimum_nights_avg_ntm",
+    "maximum_nights_avg_ntm",
+    "availability_30",
+    "availability_60",
+    "availability_90",
+    "availability_365",
+    "calendar_last_scraped",
+    "number_of_reviews",
+    "number_of_reviews_ltm",
+    "number_of_reviews_l30d",
+    "availability_eoy",
+    "number_of_reviews_ly",
+    "estimated_occupancy_l365d",
+    "estimated_revenue_l365d",
+    "first_review",
+    "last_review",
+    "calculated_host_listings_count",
+    "calculated_host_listings_count_entire_homes",
+    "calculated_host_listings_count_private_rooms",
+    "calculated_host_listings_count_shared_rooms",
+    "reviews_per_month",
+]
 
 
-def align_embeddings_to_sessions(combined, chunk_size=1_000_000):
-    print("Loading listings in original order...")
+def encode_amenities(listings_read):
+    if "amenities" not in listings_read.columns:
+        return listings_read
 
-    listings = pd.read_csv("listings.csv")
-    embeddings_data = np.load("embeddings.npz")
+    def parse_amenities(val):
+        if pd.isnull(val):
+            return []
+        try:
+            parsed = ast.literal_eval(val)
+            return (
+                [str(a).strip() for a in parsed]
+                if isinstance(parsed, list)
+                else []
+            )
+        except ValueError, SyntaxError:
+            return []
 
-    listing_to_idx = pd.Series(
-        np.arange(len(listings), dtype=np.int32),
-        index=listings["id"]
+    parsed = listings_read["amenities"].apply(parse_amenities)
+    listings_read = listings_read.drop(
+        columns=["amenities"]
+    )  # Drop source immediately
+
+    print("Encoding amenities...")
+    mlb = MultiLabelBinarizer(sparse_output=True)
+    vectors = mlb.fit_transform(parsed)  # shape: (n_listings, n_amenities)
+
+    amenities_df = pd.DataFrame.sparse.from_spmatrix(
+        vectors,
+        columns=[f"amenity_{c}" for c in mlb.classes_],
+        index=listings_read.index,
     )
 
-    print("Mapping listing ids to embedding indices...")
-    embedding_indices = combined["listing_id"].map(
-        listing_to_idx
-    ).to_numpy(dtype=np.int32)
+    listings_read = pd.concat([listings_read, amenities_df], axis=1)
+    print(f"Amenity vector length: {len(mlb.classes_)} unique amenities")
+    return listings_read
 
-    n_sessions = len(combined)
 
-    output_files = []
-
-    for key in embeddings_data.files:
-        print(f"Aligning {key} embeddings...")
-
-        source_embeddings = embeddings_data[key]
-        emb_dim = source_embeddings.shape[1]
-        dtype = source_embeddings.dtype
-
-        out_path = f"{key}_combined.npy"
-
-        output = np.lib.format.open_memmap(
-            out_path,
-            mode="w+",
-            dtype=dtype,
-            shape=(n_sessions, emb_dim),
-        )
-
-        for start in range(0, n_sessions, chunk_size):
-            end = min(start + chunk_size, n_sessions)
-
-            idx_chunk = embedding_indices[start:end]
-
-            output[start:end] = source_embeddings[idx_chunk]
-
-            print(
-                f"{key}: {end:,}/{n_sessions:,}"
+def prepare_listings(listings_read):
+    """
+    Applies transformations to the listings data:
+    1. One-hot encodes host_response_time.
+    2. Converts host_response_rate and host_acceptance_rate from percentages to floats.
+    3. Converts host_is_superhost from 't'/'f' to 1/0 binary values.
+    """
+    # 1. Convert host_response_rate and host_acceptance_rate from strings (e.g., '95%') to float decimals (e.g., 0.95)
+    for col in ["host_response_rate", "host_acceptance_rate"]:
+        if col in listings_read.columns:
+            listings_read[col] = (
+                listings_read[col].str.rstrip("%").astype(float) / 100.0
             )
 
-        del output
-        output_files.append(out_path)
+    # 2. Convert host_is_superhost from 't'/'f' to 1/0 binary integers
+    if "host_is_superhost" in listings_read.columns:
+        listings_read["host_is_superhost"] = listings_read[
+            "host_is_superhost"
+        ].map({"t": 1, "f": 0})
 
-    print("Aligning done.")
+    listings_read["host_has_profile_pic"] = listings_read[
+        "host_has_profile_pic"
+    ].map({"t": 1, "f": 0})
+    listings_read["host_identity_verified"] = listings_read[
+        "host_identity_verified"
+    ].map({"t": 1, "f": 0})
+
+    # 3. One-hot encode host_response_time into binary columns (0 or 1)
+    categorical_cols = ["host_response_time", "property_type", "room_type"]
+    for col in categorical_cols:
+        if col in listings_read.columns:
+            listings_read = pd.get_dummies(
+                listings_read, columns=[col], prefix=col, dtype="int8"
+            )
+
+    # skipping for now if not sparse out of memory if sparse cpu can't handle merge later
+    # listings_read = encode_amenities(listings_read)
+    return listings_read
 
 
 def prepare_sessions(sessions_read, listings_read):
     valid_listing_ids = set(listings_read["id"])
-
     all_session_ids = set(sessions_read["listing_id"].dropna())
     missing = all_session_ids - valid_listing_ids
 
@@ -94,10 +173,9 @@ def combine_sessions_listings(sessions, listings_read):
     valid_listing_ids = set(listings_read["id"])
 
     booked_mask = sessions["booked"] == 1
+    unlisted_mask = ~sessions["listing_id"].isin(valid_listing_ids)
     users_who_booked_unlisted = set(
-        sessions[
-            booked_mask & ~sessions["listing_id"].isin(valid_listing_ids)
-        ]["user_id"]
+        sessions[booked_mask & unlisted_mask]["user_id"]
     )
 
     sessions_filtered = sessions[
@@ -105,69 +183,14 @@ def combine_sessions_listings(sessions, listings_read):
     ]
 
     combined = sessions_filtered.merge(
-        listings_read, left_on="listing_id", right_on="id", how="left"
+        listings_read, left_on="listing_id", right_on="id", how="inner"
     )
-    combined = combined[combined["id"].notna()]
 
     print(f"combined after merge: {combined.shape}")
-
-    print("Aligning listings embeddings...")
-    align_embeddings_to_sessions(combined)
 
     cols_to_drop = [
         # listings columns
         "id",
-        "listing_url",
-        "scrape_id",
-        "last_scraped",
-        "source",
-        "picture_url",
-        "host_id",
-        "host_url",
-        "host_name",
-        "host_location",
-        "host_about",
-        "host_thumbnail_url",
-        "host_picture_url",
-        "host_neighbourhood",
-        "host_listings_count",
-        "host_total_listings_count",
-        "host_verifications",
-        "host_has_profile_pic",
-        "host_identity_verified",
-        "neighbourhood_cleansed",
-        "neighbourhood_group_cleansed",
-        "latitude",
-        "longitude",
-        "accommodates",
-        "bathrooms_text",
-        "minimum_nights",
-        "maximum_nights",
-        "minimum_minimum_nights",
-        "maximum_minimum_nights",
-        "minimum_maximum_nights",
-        "maximum_maximum_nights",
-        "minimum_nights_avg_ntm",
-        "maximum_nights_avg_ntm",
-        "availability_30",
-        "availability_60",
-        "availability_90",
-        "availability_365",
-        "calendar_last_scraped",
-        "number_of_reviews",
-        "number_of_reviews_ltm",
-        "number_of_reviews_l30d",
-        "availability_eoy",
-        "number_of_reviews_ly",
-        "estimated_occupancy_l365d",
-        "estimated_revenue_l365d",
-        "first_review",
-        "last_review",
-        "calculated_host_listings_count",
-        "calculated_host_listings_count_entire_homes",
-        "calculated_host_listings_count_private_rooms",
-        "calculated_host_listings_count_shared_rooms",
-        "reviews_per_month",
         # sessions columns
         "timestamp",
         "user_id",
@@ -177,7 +200,8 @@ def combine_sessions_listings(sessions, listings_read):
     combined = combined.drop(columns=cols_to_drop)
     print(f"combined after drop shape: {combined.shape}")
 
-    combined.to_csv("combined.csv", index=False)
+    combined.to_parquet("combined.parquet", index=False, engine="fastparquet")
+    print("Saved combined.parquet")
 
 
 if __name__ == "__main__":
@@ -187,26 +211,26 @@ if __name__ == "__main__":
     valid_sampled_listing_ids = sessions_read["listing_id"].dropna().unique()
 
     print("Reading listings...")
-    listings_read = pd.read_csv("listings.csv")
+    all_listings_cols = pd.read_csv("listings.csv", nrows=0).columns
+    cols_to_keep = [
+        col for col in all_listings_cols if col not in COLS_TO_IGNORE
+    ]
+    listings_read = pd.read_csv("listings.csv", usecols=cols_to_keep)
     listings_read = listings_read[
         listings_read["id"].isin(valid_sampled_listing_ids)
     ]
-    print(listings_read["id"].duplicated().sum())
 
     print("Removing duplicates...")
-
-    # Remove duplicate listing IDs
-    n_dup_listings = listings_read["id"].duplicated().sum()
-    print(f"{n_dup_listings} duplicate listing IDs — dropping")
     listings_read = listings_read.drop_duplicates(subset="id")
-
-    # Remove fully identical session rows, then targeted key duplicates
-    n_dup_sessions_full = sessions_read.duplicated().sum()
-    print(f"{n_dup_sessions_full} fully duplicate session rows — dropping")
     sessions_read = sessions_read.drop_duplicates()
+
+    print("Preprocessing listings...")
+    listings_read = prepare_listings(listings_read)
 
     print("Preparing sessions...")
     sessions = prepare_sessions(sessions_read, listings_read)
+
+    del sessions_read
 
     print("Combining sessions with listings...")
     combine_sessions_listings(sessions, listings_read)
