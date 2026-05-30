@@ -72,7 +72,7 @@ def encode_amenities(listings_read):
                 if isinstance(parsed, list)
                 else []
             )
-        except ValueError, SyntaxError:
+        except (ValueError, SyntaxError):
             return []
 
     parsed = listings_read["amenities"].apply(parse_amenities)
@@ -194,7 +194,6 @@ def combine_sessions_listings(sessions, listings_read):
         # sessions columns
         "timestamp",
         "user_id",
-        "listing_id",
     ]
 
     combined = combined.drop(columns=cols_to_drop)
