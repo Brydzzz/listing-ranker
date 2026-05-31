@@ -49,7 +49,6 @@ EMB_COLS = ["name", "description"]
 CHUNK_SIZE = 500_000
 
 
-
 def build_keras_ranker(max_list_size, num_features):
     inputs = tf.keras.Input(
         shape=(max_list_size, num_features),
@@ -66,7 +65,7 @@ def build_keras_ranker(max_list_size, num_features):
 
     x_skip = x
     x = tf.keras.layers.Dense(256, activation="swish")(x)
-    x = tf.keras.layers.Dropout(0.1)(x)
+    x = tf.keras.layers.Dropout(0.3)(x)
     x = tf.keras.layers.Dense(256)(x)
     x = tf.keras.layers.Add()([x, x_skip])
     x = tf.keras.layers.LayerNormalization()(x)
@@ -97,15 +96,15 @@ def build_keras_ranker(max_list_size, num_features):
 
     # --- STAGE 3: MULTI-HEAD CROSS-DOCUMENT ATTENTION ---
     attended = tfr.keras.layers.DocumentInteractionAttention(
-        num_heads=8,
+        num_heads=4,
         head_size=32,
         num_layers=2,
-        dropout=0.1,
+        dropout=0.2,
     )((combined_features, mask))
 
     # --- STAGE 4: FINAL SCORING LAYER ---
     scores = tf.keras.layers.Dense(64, activation="swish")(attended)
-    scores = tf.keras.layers.Dropout(0.1)(scores)
+    scores = tf.keras.layers.Dropout(0.3)(scores)
     scores = tf.keras.layers.Dense(1)(scores)
     scores = tf.keras.layers.Reshape((max_list_size,))(scores)
 
@@ -139,6 +138,7 @@ def load_and_split_data(rows_limit: int | None = None):
 
     if rows_limit:
         from fastparquet import ParquetFile
+
         pf = ParquetFile("combined.parquet")
         data = pf.head(rows_limit)
     else:
@@ -225,18 +225,25 @@ def load_and_split_data(rows_limit: int | None = None):
     data = data.drop(columns=[c for c in removed_cols if c in data.columns])
 
     unique_booked_listings = data["booked_listing_id"].unique()
-    train_booked, test_booked = train_test_split(
+    train_val_booked, test_booked = train_test_split(
         unique_booked_listings, test_size=0.2, random_state=42
+    )
+    train_booked, val_booked = train_test_split(
+        train_val_booked, test_size=0.15, random_state=42
     )
 
     train_data = data[
         data["booked_listing_id"].isin(train_booked)
     ].sort_values("session_id")
+    val_data = data[data["booked_listing_id"].isin(val_booked)].sort_values(
+        "session_id"
+    )
     test_data = data[data["booked_listing_id"].isin(test_booked)].sort_values(
         "session_id"
     )
 
     train_groups = train_data.groupby("session_id", sort=False).size().values
+    val_groups = val_data.groupby("session_id", sort=False).size().values
     test_groups = test_data.groupby("session_id", sort=False).size().values
 
     cols_to_drop = [
@@ -247,29 +254,69 @@ def load_and_split_data(rows_limit: int | None = None):
         "booked_listing_id",
     ] + [c for c in naive_cols if c in train_data.columns]
 
-    X_train_raw = train_data.drop(columns=cols_to_drop).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    X_test_raw = test_data.drop(columns=cols_to_drop).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    tabular_features = [c for c in train_data.columns if c not in cols_to_drop]
+    print("\n" + "=" * 50)
+    print(f"TF NN Tabular Features ({len(tabular_features)}):")
+    print(tabular_features)
+    print(f"\nTF NN Embedding Features ({len(EMB_COLS)}):")
+    print(EMB_COLS)
+    print("=" * 50 + "\n")
 
+    X_train_raw = (
+        train_data.drop(columns=cols_to_drop)
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+    )
+    X_val_raw = (
+        val_data.drop(columns=cols_to_drop)
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+    )
+    X_test_raw = (
+        test_data.drop(columns=cols_to_drop)
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+    )
 
     non_constant_cols = [
         c for c in X_train_raw.columns if X_train_raw[c].nunique() > 1
     ]
 
     scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train_raw[non_constant_cols]).astype(np.float32)
-    X_test_scaled = scaler.transform(X_test_raw[non_constant_cols]).astype(np.float32)
-
+    X_train_scaled = scaler.fit_transform(
+        X_train_raw[non_constant_cols]
+    ).astype(np.float32)
+    X_val_scaled = scaler.transform(X_val_raw[non_constant_cols]).astype(
+        np.float32
+    )
+    X_test_scaled = scaler.transform(X_test_raw[non_constant_cols]).astype(
+        np.float32
+    )
 
     y_train = train_data["booked"].to_numpy(dtype=np.float32)
+    y_val = val_data["booked"].to_numpy(dtype=np.float32)
     y_test = test_data["booked"].to_numpy(dtype=np.float32)
 
     train_ids = train_data["listing_id"].to_numpy()
+    val_ids = val_data["listing_id"].to_numpy()
     test_ids = test_data["listing_id"].to_numpy()
 
     return (
-        X_train_scaled, y_train, train_ids, train_groups,
-        X_test_scaled, y_test, test_ids, test_groups,
-        test_data, naive_cols, scaler,
+        X_train_scaled,
+        y_train,
+        train_ids,
+        train_groups,
+        X_val_scaled,
+        y_val,
+        val_ids,
+        val_groups,
+        X_test_scaled,
+        y_test,
+        test_ids,
+        test_groups,
+        test_data,
+        naive_cols,
+        scaler,
     )
 
 
@@ -281,7 +328,7 @@ def build_tf_dataset(
     lookup: EmbeddingLookup,
     max_list_size: int,
     batch_size: int,
-    is_training: bool = True
+    is_training: bool = True,
 ):
     dummy_emb = [lookup.fetch(listing_ids[0], col) for col in EMB_COLS]
     emb_dim = sum(e.shape[0] for e in dummy_emb)
@@ -306,9 +353,20 @@ def build_tf_dataset(
 
             pad_len = max_list_size - size
             if pad_len > 0:
-                x_padded = np.pad(x_combined, ((0, pad_len), (0, 0)), mode='constant')
-                y_padded = np.pad(y_slice, (0, pad_len), mode='constant', constant_values=-1.0)
-                mask_padded = np.pad(np.ones(size, dtype=np.bool_), (0, pad_len), mode='constant')
+                x_padded = np.pad(
+                    x_combined, ((0, pad_len), (0, 0)), mode="constant"
+                )
+                y_padded = np.pad(
+                    y_slice,
+                    (0, pad_len),
+                    mode="constant",
+                    constant_values=-1.0,
+                )
+                mask_padded = np.pad(
+                    np.ones(size, dtype=np.bool_),
+                    (0, pad_len),
+                    mode="constant",
+                )
             else:
                 x_padded = x_combined
                 y_padded = y_slice
@@ -316,18 +374,22 @@ def build_tf_dataset(
 
             yield (
                 {"features_input": x_padded, "mask_input": mask_padded},
-                y_padded
+                y_padded,
             )
 
     dataset = tf.data.Dataset.from_generator(
         session_generator,
         output_signature=(
             {
-                "features_input": tf.TensorSpec(shape=(max_list_size, num_features), dtype=tf.float32),
-                "mask_input": tf.TensorSpec(shape=(max_list_size,), dtype=tf.bool)
+                "features_input": tf.TensorSpec(
+                    shape=(max_list_size, num_features), dtype=tf.float32
+                ),
+                "mask_input": tf.TensorSpec(
+                    shape=(max_list_size,), dtype=tf.bool
+                ),
             },
-            tf.TensorSpec(shape=(max_list_size,), dtype=tf.float32)
-        )
+            tf.TensorSpec(shape=(max_list_size,), dtype=tf.float32),
+        ),
     )
 
     if is_training:
@@ -383,36 +445,93 @@ def main():
     lookup = EmbeddingLookup()
 
     (
-        X_train_tab, y_train, train_ids, train_groups,
-        X_test_tab, y_test, test_ids, test_groups,
-        test_data, naive_cols, scaler
-    ) = load_and_split_data(rows_limit=1_000_000)
+        X_train_tab,
+        y_train,
+        train_ids,
+        train_groups,
+        X_val_tab,
+        y_val,
+        val_ids,
+        val_groups,
+        X_test_tab,
+        y_test,
+        test_ids,
+        test_groups,
+        test_data,
+        naive_cols,
+        scaler,
+    ) = load_and_split_data(rows_limit=4_200_000)
+
+
+    print("\n" + "=" * 40)
+    print("DATASET SPLIT SIZES")
+    print("=" * 40)
+    print(f"Training:   {len(X_train_tab):>9,} single sessions | {len(train_groups):>7,} lists")
+    print(f"Validation: {len(X_val_tab):>9,} single sessions | {len(val_groups):>7,} lists")
+    print(f"Testing:    {len(X_test_tab):>9,} single sessions | {len(test_groups):>7,} lists")
+    print("=" * 40 + "\n")
 
     max_list_size = int(max(max(train_groups), max(test_groups)))
     eval_df = test_data.copy().reset_index(drop=True)
 
     print("\nPreparing Lazy-Loading TensorFlow Datasets...")
     train_ds, num_features = build_tf_dataset(
-        X_train_tab, y_train, train_ids, train_groups, lookup, max_list_size, batch_size=64, is_training=True
+        X_train_tab,
+        y_train,
+        train_ids,
+        train_groups,
+        lookup,
+        max_list_size,
+        batch_size=64,
+        is_training=True,
+    )
+
+    val_ds, _ = build_tf_dataset(
+        X_val_tab,
+        y_val,
+        val_ids,
+        val_groups,
+        lookup,
+        max_list_size,
+        batch_size=64,
+        is_training=False,
     )
 
     test_ds, _ = build_tf_dataset(
-        X_test_tab, y_test, test_ids, test_groups, lookup, max_list_size, batch_size=64, is_training=False
+        X_test_tab,
+        y_test,
+        test_ids,
+        test_groups,
+        lookup,
+        max_list_size,
+        batch_size=64,
+        is_training=False,
     )
-    print(f"Dataset Pipeline Prepared: max_list_size={max_list_size}, num_features={num_features}")
-
+    print(
+        f"Dataset Pipeline Prepared: max_list_size={max_list_size}, num_features={num_features}"
+    )
 
     model = build_keras_ranker(max_list_size, num_features)
 
     model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001),
+        optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
         loss=custom_softmax_ranking_loss,
     )
 
-    print("Training Production TF-Ranking Neural Model on GPU...")
+
+    early_stopping = tf.keras.callbacks.EarlyStopping(
+        monitor='val_loss',
+        patience=4,
+        restore_best_weights=True,
+        verbose=1
+    )
+
+    print("Training TF-Ranking Neural Model...")
     model.fit(
         train_ds,
+        validation_data=val_ds,
         epochs=12,
+        callbacks=[early_stopping],
         verbose=1,
     )
 
@@ -465,7 +584,7 @@ def main():
     ]
     print("\n" + "=" * 60 + "\nNAIVE EVALUATION\n" + "=" * 60)
     print(pd.DataFrame(naive_res)[cols].to_string(index=False))
-    print("\n" + "=" * 60 + "\nGOOGLE TF-RANKING NET EVALUATION\n" + "=" * 60)
+    print("\n" + "=" * 60 + "\nTF-RANKING NET EVALUATION\n" + "=" * 60)
     print(pd.DataFrame(neural_res)[cols].to_string(index=False))
 
 
