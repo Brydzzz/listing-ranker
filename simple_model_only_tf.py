@@ -137,10 +137,9 @@ def load_and_split_data(rows_limit: int | None = None):
     print("Reading combined.parquet...")
 
     if rows_limit:
-        from fastparquet import ParquetFile
-
-        pf = ParquetFile("combined.parquet")
-        data = pf.head(rows_limit)
+        # polars is reading parquet faster with less ram, but for compatiblity with rest of the code we are converting to pandas
+        import polars as pl
+        data = pl.read_parquet("combined.parquet", n_rows=rows_limit).to_pandas()
     else:
         data = pd.read_parquet("combined.parquet")
 

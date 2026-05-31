@@ -16,6 +16,8 @@ dependencies = [
     "sentence-transformers>=5.5.1",
     "tensorflow[and-cuda]>=2.15.0, <2.16.0",
     "tensorflow-ranking>=0.5.3",
+    "polars>=1.40.1",
+    "pyarrow>=24.0.0",
 ]
 
 [tool.uv]
