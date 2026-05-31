@@ -60,13 +60,13 @@ def build_keras_ranker(max_list_size, num_features):
     )
 
     # --- STAGE 1: DEEP RESIDUAL INDEPENDENT DOCUMENT ENCODING ---
-    x = tf.keras.layers.Dense(256, activation="swish")(inputs)
+    x = tf.keras.layers.Dense(64, activation="swish")(inputs)
     x = tf.keras.layers.LayerNormalization()(x)
 
     x_skip = x
-    x = tf.keras.layers.Dense(256, activation="swish")(x)
+    x = tf.keras.layers.Dense(64, activation="swish")(x)
     x = tf.keras.layers.Dropout(0.3)(x)
-    x = tf.keras.layers.Dense(256)(x)
+    x = tf.keras.layers.Dense(64)(x)
     x = tf.keras.layers.Add()([x, x_skip])
     x = tf.keras.layers.LayerNormalization()(x)
 
@@ -89,16 +89,16 @@ def build_keras_ranker(max_list_size, num_features):
     )([x, mask])
 
     combined_features = tf.keras.layers.Concatenate()([x, slate_context])
-    combined_features = tf.keras.layers.Dense(128, activation="swish")(
+    combined_features = tf.keras.layers.Dense(64, activation="swish")(
         combined_features
     )
     combined_features = tf.keras.layers.LayerNormalization()(combined_features)
 
     # --- STAGE 3: MULTI-HEAD CROSS-DOCUMENT ATTENTION ---
     attended = tfr.keras.layers.DocumentInteractionAttention(
-        num_heads=4,
-        head_size=32,
-        num_layers=2,
+        num_heads=2,
+        head_size=16,
+        num_layers=1,
         dropout=0.2,
     )((combined_features, mask))
 
@@ -514,14 +514,14 @@ def main():
     model = build_keras_ranker(max_list_size, num_features)
 
     model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
+        optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4),
         loss=custom_softmax_ranking_loss,
     )
 
 
     early_stopping = tf.keras.callbacks.EarlyStopping(
         monitor='val_loss',
-        patience=4,
+        patience=3,
         restore_best_weights=True,
         verbose=1
     )
@@ -530,7 +530,7 @@ def main():
     model.fit(
         train_ds,
         validation_data=val_ds,
-        epochs=12,
+        epochs=10,
         callbacks=[early_stopping],
         verbose=1,
     )
