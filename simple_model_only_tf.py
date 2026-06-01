@@ -59,14 +59,19 @@ def build_keras_ranker(max_list_size, num_features):
         shape=(max_list_size,), dtype=tf.bool, name="mask_input"
     )
 
+    # Regularization parameters
+    reg = tf.keras.regularizers.l2(1e-4)
+
     # --- STAGE 1: DEEP RESIDUAL INDEPENDENT DOCUMENT ENCODING ---
-    x = tf.keras.layers.Dense(64, activation="swish")(inputs)
+    # Apply Input Dropout to regularize high-dimensional text embeddings & features
+    x = tf.keras.layers.Dropout(0.3)(inputs)
+    x = tf.keras.layers.Dense(32, activation="swish", kernel_regularizer=reg)(x)
     x = tf.keras.layers.LayerNormalization()(x)
 
     x_skip = x
-    x = tf.keras.layers.Dense(64, activation="swish")(x)
-    x = tf.keras.layers.Dropout(0.3)(x)
-    x = tf.keras.layers.Dense(64)(x)
+    x = tf.keras.layers.Dense(32, activation="swish", kernel_regularizer=reg)(x)
+    x = tf.keras.layers.Dropout(0.35)(x)
+    x = tf.keras.layers.Dense(32, kernel_regularizer=reg)(x)
     x = tf.keras.layers.Add()([x, x_skip])
     x = tf.keras.layers.LayerNormalization()(x)
 
@@ -89,23 +94,24 @@ def build_keras_ranker(max_list_size, num_features):
     )([x, mask])
 
     combined_features = tf.keras.layers.Concatenate()([x, slate_context])
-    combined_features = tf.keras.layers.Dense(64, activation="swish")(
+    combined_features = tf.keras.layers.Dense(32, activation="swish", kernel_regularizer=reg)(
         combined_features
     )
+    combined_features = tf.keras.layers.Dropout(0.35)(combined_features)
     combined_features = tf.keras.layers.LayerNormalization()(combined_features)
 
     # --- STAGE 3: MULTI-HEAD CROSS-DOCUMENT ATTENTION ---
     attended = tfr.keras.layers.DocumentInteractionAttention(
-        num_heads=2,
-        head_size=16,
+        num_heads=1,
+        head_size=8,
         num_layers=1,
-        dropout=0.2,
+        dropout=0.35,
     )((combined_features, mask))
 
     # --- STAGE 4: FINAL SCORING LAYER ---
-    scores = tf.keras.layers.Dense(64, activation="swish")(attended)
-    scores = tf.keras.layers.Dropout(0.3)(scores)
-    scores = tf.keras.layers.Dense(1)(scores)
+    scores = tf.keras.layers.Dense(64, activation="swish", kernel_regularizer=reg)(attended)
+    scores = tf.keras.layers.Dropout(0.4)(scores)
+    scores = tf.keras.layers.Dense(1, kernel_regularizer=reg)(scores)
     scores = tf.keras.layers.Reshape((max_list_size,))(scores)
 
     return tf.keras.Model(inputs=[inputs, mask], outputs=scores)
@@ -165,17 +171,7 @@ def load_and_split_data(rows_limit: int | None = None):
     ]
     meta_data = data[meta_cols]
 
-    data = data.select_dtypes(
-        include=[
-            "int",
-            "float",
-            "bool",
-            "int32",
-            "int64",
-            "float32",
-            "float64",
-        ]
-    )
+    data = data.select_dtypes(include=["number", "bool"])
 
     for col in meta_cols:
         if col not in data.columns:
@@ -513,7 +509,7 @@ def main():
     model = build_keras_ranker(max_list_size, num_features)
 
     model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4),
+        optimizer=tf.keras.optimizers.Adam(learning_rate=5e-5),
         loss=custom_softmax_ranking_loss,
     )
 
