@@ -203,7 +203,7 @@ def combine_sessions_listings(sessions, listings_read):
 
 if __name__ == "__main__":
     print("Reading sessions...")
-    sessions_read = pd.read_csv("sessions.csv", dtype={"listing_id": "Int64"}, nrows=2000000)
+    sessions_read = pd.read_csv("sessions.csv", dtype={"listing_id": "Int64"})
 
     valid_sampled_listing_ids = sessions_read["listing_id"].dropna().unique()
 
