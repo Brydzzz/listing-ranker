@@ -1,3 +1,5 @@
+import gc
+
 import numpy as np
 import pandas as pd
 import tensorflow as tf
@@ -5,20 +7,18 @@ import tensorflow_ranking as tfr
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
-# ============================================================
-# CRITICAL GPU ENGINE HARDWARE INITIALIZATION
-# ============================================================
+
 gpus = tf.config.list_physical_devices("GPU")
 if gpus:
     try:
         for gpu in gpus:
             tf.config.experimental.set_memory_growth(gpu, True)
-        print(f"🌲 Hardware engine configured. Active GPU device: {gpus}")
+        print(f"Hardware engine configured. Active GPU device: {gpus}")
     except RuntimeError as e:
         print(f"Hardware engine assignment failed: {e}")
 else:
     print(
-        "⚠️ WARNING: No GPU detected. Defaulting to fallback CPU execution pipeline."
+        "WARNING: No GPU detected. Defaulting to fallback CPU execution pipeline."
     )
 
 
@@ -65,11 +65,15 @@ def build_keras_ranker(max_list_size, num_features):
     # --- STAGE 1: DEEP RESIDUAL INDEPENDENT DOCUMENT ENCODING ---
     # Apply Input Dropout to regularize high-dimensional text embeddings & features
     x = tf.keras.layers.Dropout(0.3)(inputs)
-    x = tf.keras.layers.Dense(32, activation="swish", kernel_regularizer=reg)(x)
+    x = tf.keras.layers.Dense(32, activation="swish", kernel_regularizer=reg)(
+        x
+    )
     x = tf.keras.layers.LayerNormalization()(x)
 
     x_skip = x
-    x = tf.keras.layers.Dense(32, activation="swish", kernel_regularizer=reg)(x)
+    x = tf.keras.layers.Dense(32, activation="swish", kernel_regularizer=reg)(
+        x
+    )
     x = tf.keras.layers.Dropout(0.35)(x)
     x = tf.keras.layers.Dense(32, kernel_regularizer=reg)(x)
     x = tf.keras.layers.Add()([x, x_skip])
@@ -94,9 +98,9 @@ def build_keras_ranker(max_list_size, num_features):
     )([x, mask])
 
     combined_features = tf.keras.layers.Concatenate()([x, slate_context])
-    combined_features = tf.keras.layers.Dense(32, activation="swish", kernel_regularizer=reg)(
-        combined_features
-    )
+    combined_features = tf.keras.layers.Dense(
+        32, activation="swish", kernel_regularizer=reg
+    )(combined_features)
     combined_features = tf.keras.layers.Dropout(0.35)(combined_features)
     combined_features = tf.keras.layers.LayerNormalization()(combined_features)
 
@@ -109,7 +113,9 @@ def build_keras_ranker(max_list_size, num_features):
     )((combined_features, mask))
 
     # --- STAGE 4: FINAL SCORING LAYER ---
-    scores = tf.keras.layers.Dense(64, activation="swish", kernel_regularizer=reg)(attended)
+    scores = tf.keras.layers.Dense(
+        64, activation="swish", kernel_regularizer=reg
+    )(attended)
     scores = tf.keras.layers.Dropout(0.4)(scores)
     scores = tf.keras.layers.Dense(1, kernel_regularizer=reg)(scores)
     scores = tf.keras.layers.Reshape((max_list_size,))(scores)
@@ -145,7 +151,10 @@ def load_and_split_data(rows_limit: int | None = None):
     if rows_limit:
         # polars is reading parquet faster with less ram, but for compatiblity with rest of the code we are converting to pandas
         import polars as pl
-        data = pl.read_parquet("combined.parquet", n_rows=rows_limit).to_pandas()
+
+        data = pl.read_parquet(
+            "combined.parquet", n_rows=rows_limit
+        ).to_pandas()
     else:
         data = pd.read_parquet("combined.parquet")
 
@@ -237,6 +246,9 @@ def load_and_split_data(rows_limit: int | None = None):
         "session_id"
     )
 
+    del data
+    gc.collect()
+
     train_groups = train_data.groupby("session_id", sort=False).size().values
     val_groups = val_data.groupby("session_id", sort=False).size().values
     test_groups = test_data.groupby("session_id", sort=False).size().values
@@ -257,37 +269,6 @@ def load_and_split_data(rows_limit: int | None = None):
     print(EMB_COLS)
     print("=" * 50 + "\n")
 
-    X_train_raw = (
-        train_data.drop(columns=cols_to_drop)
-        .replace([np.inf, -np.inf], np.nan)
-        .fillna(0.0)
-    )
-    X_val_raw = (
-        val_data.drop(columns=cols_to_drop)
-        .replace([np.inf, -np.inf], np.nan)
-        .fillna(0.0)
-    )
-    X_test_raw = (
-        test_data.drop(columns=cols_to_drop)
-        .replace([np.inf, -np.inf], np.nan)
-        .fillna(0.0)
-    )
-
-    non_constant_cols = [
-        c for c in X_train_raw.columns if X_train_raw[c].nunique() > 1
-    ]
-
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(
-        X_train_raw[non_constant_cols]
-    ).astype(np.float32)
-    X_val_scaled = scaler.transform(X_val_raw[non_constant_cols]).astype(
-        np.float32
-    )
-    X_test_scaled = scaler.transform(X_test_raw[non_constant_cols]).astype(
-        np.float32
-    )
-
     y_train = train_data["booked"].to_numpy(dtype=np.float32)
     y_val = val_data["booked"].to_numpy(dtype=np.float32)
     y_test = test_data["booked"].to_numpy(dtype=np.float32)
@@ -295,6 +276,49 @@ def load_and_split_data(rows_limit: int | None = None):
     train_ids = train_data["listing_id"].to_numpy()
     val_ids = val_data["listing_id"].to_numpy()
     test_ids = test_data["listing_id"].to_numpy()
+
+    scaler = StandardScaler(copy=False)
+
+    print("Processing and scaling Train dataset...")
+    X_train_raw = train_data.drop(columns=cols_to_drop)
+    del train_data
+    gc.collect()
+
+    X_train_raw.replace([np.inf, -np.inf], np.nan, inplace=True)
+    X_train_raw.fillna(0.0, inplace=True)
+    X_train_raw = X_train_raw.astype(np.float32)
+
+    non_constant_cols = [
+        c for c in X_train_raw.columns if X_train_raw[c].nunique() > 1
+    ]
+
+    X_train_scaled = scaler.fit_transform(X_train_raw[non_constant_cols])
+    del X_train_raw
+    gc.collect()
+
+    print("Processing and scaling Train dataset...")
+    X_val_raw = val_data.drop(columns=cols_to_drop)
+    del val_data
+    gc.collect()
+
+    X_val_raw.replace([np.inf, -np.inf], np.nan, inplace=True)
+    X_val_raw.fillna(0.0, inplace=True)
+    X_val_raw = X_val_raw.astype(np.float32)
+
+    X_val_scaled = scaler.transform(X_val_raw[non_constant_cols])
+    del X_val_raw
+    gc.collect()
+
+    print("Processing and scaling Test dataset...")
+    X_test_raw = test_data.drop(columns=cols_to_drop)
+
+    X_test_raw.replace([np.inf, -np.inf], np.nan, inplace=True)
+    X_test_raw.fillna(0.0, inplace=True)
+    X_test_raw = X_test_raw.astype(np.float32)
+
+    X_test_scaled = scaler.transform(X_test_raw[non_constant_cols])
+    del X_test_raw
+    gc.collect()
 
     return (
         X_train_scaled,
@@ -455,19 +479,27 @@ def main():
         test_data,
         naive_cols,
         scaler,
-    ) = load_and_split_data(rows_limit=4_200_000)
-
+    ) = load_and_split_data()
 
     print("\n" + "=" * 40)
     print("DATASET SPLIT SIZES")
     print("=" * 40)
-    print(f"Training:   {len(X_train_tab):>9,} single sessions | {len(train_groups):>7,} lists")
-    print(f"Validation: {len(X_val_tab):>9,} single sessions | {len(val_groups):>7,} lists")
-    print(f"Testing:    {len(X_test_tab):>9,} single sessions | {len(test_groups):>7,} lists")
+    print(
+        f"Training:   {len(X_train_tab):>9,} single sessions | {len(train_groups):>7,} lists"
+    )
+    print(
+        f"Validation: {len(X_val_tab):>9,} single sessions | {len(val_groups):>7,} lists"
+    )
+    print(
+        f"Testing:    {len(X_test_tab):>9,} single sessions | {len(test_groups):>7,} lists"
+    )
     print("=" * 40 + "\n")
 
     max_list_size = int(max(max(train_groups), max(test_groups)))
-    eval_df = test_data.copy().reset_index(drop=True)
+    eval_cols = ["session_id", "booked", "host_days_active"] + [
+        c for c in naive_cols if c in test_data.columns
+    ]
+    eval_df = test_data[eval_cols].copy().reset_index(drop=True)
 
     print("\nPreparing Lazy-Loading TensorFlow Datasets...")
     train_ds, num_features = build_tf_dataset(
@@ -513,19 +545,15 @@ def main():
         loss=custom_softmax_ranking_loss,
     )
 
-
     early_stopping = tf.keras.callbacks.EarlyStopping(
-        monitor='val_loss',
-        patience=3,
-        restore_best_weights=True,
-        verbose=1
+        monitor="val_loss", patience=3, restore_best_weights=True, verbose=1
     )
 
     print("Training TF-Ranking Neural Model...")
     model.fit(
         train_ds,
         validation_data=val_ds,
-        epochs=10,
+        epochs=12,
         callbacks=[early_stopping],
         verbose=1,
     )
