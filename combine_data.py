@@ -1,7 +1,7 @@
 import ast
+from collections import Counter
 
 import pandas as pd
-from sklearn.preprocessing import MultiLabelBinarizer
 
 COLS_TO_IGNORE = [
     "name",
@@ -76,22 +76,20 @@ def encode_amenities(listings_read):
             return []
 
     parsed = listings_read["amenities"].apply(parse_amenities)
-    listings_read = listings_read.drop(
-        columns=["amenities"]
-    )  # Drop source immediately
+    listings_read = listings_read.drop(columns=["amenities"])
 
-    print("Encoding amenities...")
-    mlb = MultiLabelBinarizer(sparse_output=True)
-    vectors = mlb.fit_transform(parsed)  # shape: (n_listings, n_amenities)
+    all_amenities = [a for sublist in parsed for a in sublist]
+    top_100 = [item for item, _ in Counter(all_amenities).most_common(100)]
 
-    amenities_df = pd.DataFrame.sparse.from_spmatrix(
-        vectors,
-        columns=[f"amenity_{c}" for c in mlb.classes_],
-        index=listings_read.index,
-    )
+    amenity_cols = {}
+    for amenity in top_100:
+        amenity_cols[f"amenity_{amenity}"] = parsed.apply(
+            lambda x: 1 if amenity in x else 0
+        ).astype("int8")
 
+    amenities_df = pd.DataFrame(amenity_cols, index=listings_read.index)
     listings_read = pd.concat([listings_read, amenities_df], axis=1)
-    print(f"Amenity vector length: {len(mlb.classes_)} unique amenities")
+    print(f"Amenity vector length: {len(top_100)} unique amenities")
     return listings_read
 
 
@@ -131,7 +129,7 @@ def prepare_listings(listings_read):
             )
 
     # skipping for now if not sparse out of memory if sparse cpu can't handle merge later
-    # listings_read = encode_amenities(listings_read)
+    listings_read = encode_amenities(listings_read)
     return listings_read
 
 
@@ -205,7 +203,7 @@ def combine_sessions_listings(sessions, listings_read):
 
 if __name__ == "__main__":
     print("Reading sessions...")
-    sessions_read = pd.read_csv("sessions.csv", dtype={"listing_id": "Int64"})
+    sessions_read = pd.read_csv("sessions.csv", dtype={"listing_id": "Int64"}, nrows=2000000)
 
     valid_sampled_listing_ids = sessions_read["listing_id"].dropna().unique()
 
