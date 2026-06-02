@@ -7,7 +7,6 @@ import tensorflow_ranking as tfr
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
-
 gpus = tf.config.list_physical_devices("GPU")
 if gpus:
     try:
@@ -145,16 +144,24 @@ def custom_softmax_ranking_loss(y_true, y_pred):
     )
 
 
-def load_and_split_data(rows_limit: int | None = None):
+def load_and_split_data(rows_limit: int | None = None, tail: bool = False):
     print("Reading combined.parquet...")
 
     if rows_limit:
         # polars is reading parquet faster with less ram, but for compatiblity with rest of the code we are converting to pandas
         import polars as pl
 
-        data = pl.read_parquet(
-            "combined.parquet", n_rows=rows_limit
-        ).to_pandas()
+        if tail:
+            data = (
+                pl.scan_parquet("combined.parquet")
+                .tail(rows_limit)
+                .collect()
+                .to_pandas()
+            )
+        else:
+            data = pl.read_parquet(
+                "combined.parquet", n_rows=rows_limit
+            ).to_pandas()
     else:
         data = pd.read_parquet("combined.parquet")
 
@@ -296,7 +303,7 @@ def load_and_split_data(rows_limit: int | None = None):
     del X_train_raw
     gc.collect()
 
-    print("Processing and scaling Train dataset...")
+    print("Processing and scaling Val dataset...")
     X_val_raw = val_data.drop(columns=cols_to_drop)
     del val_data
     gc.collect()
@@ -356,11 +363,9 @@ def build_tf_dataset(
     def session_generator():
         idx = 0
         for g_size in groups:
-            size = min(g_size, max_list_size)
-
-            x_slice = X_tab[idx : idx + size]
-            y_slice = y[idx : idx + size]
-            ids_slice = listing_ids[idx : idx + size]
+            x_slice = X_tab[idx : idx + g_size]
+            y_slice = y[idx : idx + g_size]
+            ids_slice = listing_ids[idx : idx + g_size]
             idx += g_size
 
             emb_parts = [lookup.fetch(ids_slice, col) for col in EMB_COLS]
@@ -370,51 +375,42 @@ def build_tf_dataset(
             else:
                 x_combined = np.empty((0, num_features), dtype=np.float32)
 
-            pad_len = max_list_size - size
-            if pad_len > 0:
-                x_padded = np.pad(
-                    x_combined, ((0, pad_len), (0, 0)), mode="constant"
-                )
-                y_padded = np.pad(
-                    y_slice,
-                    (0, pad_len),
-                    mode="constant",
-                    constant_values=-1.0,
-                )
-                mask_padded = np.pad(
-                    np.ones(size, dtype=np.bool_),
-                    (0, pad_len),
-                    mode="constant",
-                )
-            else:
-                x_padded = x_combined
-                y_padded = y_slice
-                mask_padded = np.ones(size, dtype=np.bool_)
-
-            yield (
-                {"features_input": x_padded, "mask_input": mask_padded},
-                y_padded,
-            )
+            mask = np.ones(g_size, dtype=np.bool_)
+            yield ({"features_input": x_combined, "mask_input": mask}, y_slice)
 
     dataset = tf.data.Dataset.from_generator(
         session_generator,
         output_signature=(
             {
                 "features_input": tf.TensorSpec(
-                    shape=(max_list_size, num_features), dtype=tf.float32
+                    shape=(None, num_features), dtype=tf.float32
                 ),
-                "mask_input": tf.TensorSpec(
-                    shape=(max_list_size,), dtype=tf.bool
-                ),
+                "mask_input": tf.TensorSpec(shape=(None), dtype=tf.bool),
             },
-            tf.TensorSpec(shape=(max_list_size,), dtype=tf.float32),
+            tf.TensorSpec(shape=(None,), dtype=tf.float32),
         ),
     )
 
     if is_training:
         dataset = dataset.shuffle(buffer_size=1000)
 
-    dataset = dataset.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+    dataset = dataset.padded_batch(
+        batch_size,
+        padded_shapes=(
+            {
+                "features_input": [max_list_size, num_features],
+                "mask_input": [max_list_size],
+            },
+            [max_list_size],
+        ),
+        padding_values=(
+            {
+                "features_input": 0.0,
+                "mask_input": False,
+            },
+            -1.0,
+        ),
+    ).prefetch(tf.data.AUTOTUNE)
     return dataset, num_features
 
 
@@ -479,7 +475,7 @@ def main():
         test_data,
         naive_cols,
         scaler,
-    ) = load_and_split_data()
+    ) = load_and_split_data(rows_limit=4_200_000, tail=True)
 
     print("\n" + "=" * 40)
     print("DATASET SPLIT SIZES")
@@ -495,11 +491,13 @@ def main():
     )
     print("=" * 40 + "\n")
 
-    max_list_size = int(max(max(train_groups), max(test_groups)))
+    max_list_size = int(max(max(train_groups), max(test_groups), max(val_groups)))
     eval_cols = ["session_id", "booked", "host_days_active"] + [
         c for c in naive_cols if c in test_data.columns
     ]
     eval_df = test_data[eval_cols].copy().reset_index(drop=True)
+
+    BATCH_SIZE = 64
 
     print("\nPreparing Lazy-Loading TensorFlow Datasets...")
     train_ds, num_features = build_tf_dataset(
@@ -509,7 +507,7 @@ def main():
         train_groups,
         lookup,
         max_list_size,
-        batch_size=64,
+        batch_size=BATCH_SIZE,
         is_training=True,
     )
 
@@ -520,7 +518,7 @@ def main():
         val_groups,
         lookup,
         max_list_size,
-        batch_size=64,
+        batch_size=BATCH_SIZE,
         is_training=False,
     )
 
@@ -531,7 +529,7 @@ def main():
         test_groups,
         lookup,
         max_list_size,
-        batch_size=64,
+        batch_size=BATCH_SIZE,
         is_training=False,
     )
     print(
@@ -553,7 +551,7 @@ def main():
     model.fit(
         train_ds,
         validation_data=val_ds,
-        epochs=12,
+        epochs=3,
         callbacks=[early_stopping],
         verbose=1,
     )
