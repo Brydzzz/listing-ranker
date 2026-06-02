@@ -1,6 +1,8 @@
-def main():
-    print("Hello from dane!")
+from fastapi import FastAPI
 
+from app.listings_router import router as listings_router
+from app.rank_router import router as rank_router
 
-if __name__ == "__main__":
-    main()
+app = FastAPI(title="Listing Ranking Microservice")
+app.include_router(listings_router)
+app.include_router(rank_router)
