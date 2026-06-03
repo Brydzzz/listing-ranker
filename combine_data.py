@@ -2,6 +2,7 @@ import ast
 from collections import Counter
 
 import pandas as pd
+from pandas import DataFrame
 
 COLS_TO_IGNORE = [
     "name",
@@ -58,10 +59,7 @@ COLS_TO_IGNORE = [
 ]
 
 
-def encode_amenities(listings_read):
-    if "amenities" not in listings_read.columns:
-        return listings_read
-
+def encode_amenities(listings_read: pd.DataFrame) -> DataFrame:
     def parse_amenities(val):
         if pd.isnull(val):
             return []
@@ -76,7 +74,7 @@ def encode_amenities(listings_read):
             return []
 
     parsed = listings_read["amenities"].apply(parse_amenities)
-    listings_read = listings_read.drop(columns=["amenities"])
+    listings_read.drop(columns=["amenities"], inplace=True)
 
     all_amenities = [a for sublist in parsed for a in sublist]
     top_100 = [item for item, _ in Counter(all_amenities).most_common(100)]
@@ -93,47 +91,39 @@ def encode_amenities(listings_read):
     return listings_read
 
 
-def prepare_listings(listings_read):
-    """
-    Applies transformations to the listings data:
-    1. One-hot encodes host_response_time.
-    2. Converts host_response_rate and host_acceptance_rate from percentages to floats.
-    3. Converts host_is_superhost from 't'/'f' to 1/0 binary values.
-    """
-    # 1. Convert host_response_rate and host_acceptance_rate from strings (e.g., '95%') to float decimals (e.g., 0.95)
+def prepare_listings(listings_read: pd.DataFrame) -> DataFrame:
     for col in ["host_response_rate", "host_acceptance_rate"]:
-        if col in listings_read.columns:
-            listings_read[col] = (
-                listings_read[col].str.rstrip("%").astype(float) / 100.0
-            )
+        listings_read[col] = (
+            listings_read[col].str.rstrip("%").astype(float) / 100.0
+        )
 
-    # 2. Convert host_is_superhost from 't'/'f' to 1/0 binary integers
-    if "host_is_superhost" in listings_read.columns:
-        listings_read["host_is_superhost"] = listings_read[
-            "host_is_superhost"
-        ].map({"t": 1, "f": 0})
+    listings_read["price"] = (
+        listings_read["price"]
+        .str.replace("$", "", regex=False)
+        .str.replace(",", "", regex=False)
+        .astype(float)
+    )
 
-    listings_read["host_has_profile_pic"] = listings_read[
-        "host_has_profile_pic"
-    ].map({"t": 1, "f": 0})
-    listings_read["host_identity_verified"] = listings_read[
-        "host_identity_verified"
-    ].map({"t": 1, "f": 0})
+    for col in [
+        "host_is_superhost",
+        "host_has_profile_pic",
+        "host_identity_verified",
+    ]:
+        listings_read[col] = listings_read[col].map({"t": 1, "f": 0})
 
-    # 3. One-hot encode host_response_time into binary columns (0 or 1)
     categorical_cols = ["host_response_time", "property_type", "room_type"]
     for col in categorical_cols:
-        if col in listings_read.columns:
-            listings_read = pd.get_dummies(
-                listings_read, columns=[col], prefix=col, dtype="int8"
-            )
+        listings_read = pd.get_dummies(
+            listings_read, columns=[col], prefix=col, dtype="int8"
+        )
 
-    # skipping for now if not sparse out of memory if sparse cpu can't handle merge later
     listings_read = encode_amenities(listings_read)
     return listings_read
 
 
-def prepare_sessions(sessions_read, listings_read):
+def prepare_sessions(
+    sessions_read: pd.DataFrame, listings_read: pd.DataFrame
+) -> DataFrame:
     valid_listing_ids = set(listings_read["id"])
     all_session_ids = set(sessions_read["listing_id"].dropna())
     missing = all_session_ids - valid_listing_ids
@@ -184,8 +174,6 @@ def combine_sessions_listings(sessions, listings_read):
         listings_read, left_on="listing_id", right_on="id", how="inner"
     )
 
-    print(f"combined after merge: {combined.shape}")
-
     cols_to_drop = [
         # listings columns
         "id",
@@ -195,16 +183,14 @@ def combine_sessions_listings(sessions, listings_read):
     ]
 
     combined = combined.drop(columns=cols_to_drop)
-    print(f"combined after drop shape: {combined.shape}")
 
-    combined.to_parquet("combined.parquet", index=False, engine="fastparquet")
+    combined.to_parquet("combined.parquet", index=False, engine="pyarrow")
     print("Saved combined.parquet")
 
 
 if __name__ == "__main__":
     print("Reading sessions...")
     sessions_read = pd.read_csv("sessions.csv", dtype={"listing_id": "Int64"})
-
     valid_sampled_listing_ids = sessions_read["listing_id"].dropna().unique()
 
     print("Reading listings...")
@@ -218,8 +204,8 @@ if __name__ == "__main__":
     ]
 
     print("Removing duplicates...")
-    listings_read = listings_read.drop_duplicates(subset="id")
-    sessions_read = sessions_read.drop_duplicates()
+    listings_read.drop_duplicates(subset="id", inplace=True)
+    sessions_read.drop_duplicates(inplace=True)
 
     print("Preprocessing listings...")
     listings_read = prepare_listings(listings_read)
@@ -227,7 +213,10 @@ if __name__ == "__main__":
     print("Preparing sessions...")
     sessions = prepare_sessions(sessions_read, listings_read)
 
+    import gc
+
     del sessions_read
+    gc.collect()
 
     print("Combining sessions with listings...")
     combine_sessions_listings(sessions, listings_read)
