@@ -10,7 +10,7 @@ offset = max(total_rows - N_ROWS, 0)
 
 print(f"Total rows: {total_rows}, splitting at offset {offset}")
 
-df_no_ab = pl.scan_parquet(INPUT_FILE).slice(0, offset).collect()
+df_no_ab = pl.scan_parquet(INPUT_FILE).slice(0, offset).collect().drop("booked")
 df_no_ab.write_parquet(OUTPUT_NO_AB)
 print(f"Wrote {df_no_ab.height} rows to {OUTPUT_NO_AB}")
 
