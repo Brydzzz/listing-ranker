@@ -6,18 +6,20 @@ readme = "README.md"
 requires-python = ">=3.11, <3.12"
 dependencies = [
     "fastparquet>=2026.5.0",
+    "fastapi>=0.115.0",
     "jupyter>=1.1.1",
     "lightgbm>=4.6.0",
     "matplotlib>=3.10.8",
     "numpy>=1.23.5, <2.0.0",
     "pandas>=3.0.2",
+    "polars>=1.40.1",
+    "pyarrow>=24.0.0",
     "scikit-learn>=1.8.0",
     "seaborn>=0.13.2",
     "sentence-transformers>=5.5.1",
     "tensorflow[and-cuda]>=2.15.0, <2.16.0",
     "tensorflow-ranking>=0.5.3",
-    "polars>=1.40.1",
-    "pyarrow>=24.0.0",
+    "uvicorn>=0.34.0",
 ]
 
 [tool.uv]
