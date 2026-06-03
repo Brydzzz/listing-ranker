@@ -24,6 +24,7 @@ class RankingModel(str, Enum):
 
 
 class SessionEvent(BaseModel):
+    user_uid: str
     session_type: SessionType
     ranking_model: RankingModel
     listing: Listing
@@ -34,7 +35,7 @@ def record_session_event(event: SessionEvent):
     file_exists = RESULTS_CSV.exists()
     listing_dict = event.listing.model_dump()
 
-    row = {"session_type": event.session_type.value, "ranking_model": event.ranking_model.value, **listing_dict}
+    row = {"user_uid": event.user_uid, "session_type": event.session_type.value, "ranking_model": event.ranking_model.value, **listing_dict}
 
     with open(RESULTS_CSV, "a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=row.keys())
