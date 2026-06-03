@@ -68,7 +68,7 @@ writer = None
 rows = 0
 for batch in pf.iter_batches(batch_size=BATCH_SIZE, use_threads=False):
     table = pa.Table.from_batches([batch])
-    filtered = table.filter(~pc.is_in(table.column("session_id"), ab_array)).drop("booked")
+    filtered = table.filter(pc.invert(pc.is_in(table.column("session_id"), ab_array))).drop("booked")
     if filtered.num_rows == 0:
         continue
     if writer is None:
