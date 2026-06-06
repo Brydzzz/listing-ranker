@@ -20,6 +20,7 @@ dependencies = [
     "tensorflow[and-cuda]>=2.15.0, <2.16.0",
     "tensorflow-ranking>=0.5.3",
     "uvicorn>=0.34.0",
+    "httpx2>=2.2.0",
 ]
 
 [tool.uv]
