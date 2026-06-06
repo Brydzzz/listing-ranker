@@ -1,3 +1,4 @@
+import hashlib
 import random
 from pathlib import Path
 
@@ -37,7 +38,7 @@ def _row_to_listing(row: pd.Series, property_type_cols: list[str], room_type_col
     return Listing(
         listing_id=int(row["listing_id"]),
         booked=int(row["booked"]),
-        session_id=str(row["session_id"]),
+        session_id=hashlib.sha256(str(row["session_id"]).encode()).hexdigest(),
         host_since=str(row["host_since"]),
         host_response_rate=float(row["host_response_rate"]),
         host_acceptance_rate=float(row["host_acceptance_rate"]),
