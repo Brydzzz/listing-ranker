@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import random
 from pathlib import Path
 
@@ -28,7 +29,7 @@ def get_listings():
             rating=float(row["rating"]),
             number_of_reviews=int(row["number_of_reviews"]),
             neighbourhood=row["neighbourhood"],
-            session_id=row["session_id"],
+            session_id=hashlib.sha256(row["session_id"].encode()).hexdigest(),
         )
         for row in rows
         if row["session_id"] == chosen_session_id

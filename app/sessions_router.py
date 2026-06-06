@@ -36,6 +36,7 @@ def record_session_event(event: SessionEvent):
     listing_dict = event.listing.model_dump()
 
     row = {"user_uid": event.user_uid, "session_type": event.session_type.value, "ranking_model": event.ranking_model.value, **listing_dict}
+    row.pop("booked", None)
 
     with open(RESULTS_CSV, "a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=row.keys())
