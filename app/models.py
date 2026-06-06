@@ -1,22 +1,36 @@
+from abc import ABC, abstractmethod
+
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
-from abc import ABC, abstractmethod
 
 from app.schemas import Listing
 
 
 class RankingModel(ABC):
     @abstractmethod
-    def rank(self, listings: list[Listing]) -> list[Listing]:
-        ...
+    def rank(self, listings: list[Listing]) -> list[Listing]: ...
 
 
 class Model1(RankingModel):
     def rank(self, listings: list[Listing]) -> list[Listing]:
+        naive_score = {
+            listing.listing_id: np.mean(
+                [
+                    listing.review_scores_value,
+                    listing.review_scores_cleanliness,
+                    listing.review_scores_location,
+                    listing.review_scores_accuracy,
+                    listing.review_scores_rating,
+                    listing.review_scores_checkin,
+                    listing.review_scores_communication
+                ]
+            )
+            for listing in listings
+        }
         return sorted(
             listings,
-            key=lambda l: l.review_scores_rating / (l.price + 1),
+            key=lambda listing: naive_score[listing.listing_id],
             reverse=True,
         )
 
@@ -40,20 +54,26 @@ class Model2(RankingModel):
 
         df["price_diff_from_mean"] = prices - price_mean
         df["price_ratio_to_mean"] = prices / price_mean if price_mean else 0
-        df["price_ratio_to_median"] = prices / price_median if price_median else 0
+        df["price_ratio_to_median"] = (
+            prices / price_median if price_median else 0
+        )
         df["price_diff_from_min"] = prices - price_min
         df["price_z_score_session"] = (
-            (prices - price_mean) / price_std if pd.notnull(price_std) and price_std > 0 else 0
+            (prices - price_mean) / price_std
+            if pd.notnull(price_std) and price_std > 0
+            else 0
         )
 
         X = pd.DataFrame(0.0, index=df.index, columns=self.feature_names)
 
         for col in self.feature_names:
             if col in df.columns:
-                if pd.api.types.is_numeric_dtype(df[col]) or pd.api.types.is_bool_dtype(df[col]):
+                if pd.api.types.is_numeric_dtype(
+                    df[col]
+                ) or pd.api.types.is_bool_dtype(df[col]):
                     X[col] = df[col]
                 else:
-                    X[col] = pd.to_numeric(df[col], errors='coerce')
+                    X[col] = pd.to_numeric(df[col], errors="coerce")
 
         for idx, row in df.iterrows():
             pt = f"property_type_{str(row.get('property_type', '')).replace(' ', '_')}"
@@ -76,5 +96,5 @@ class Model2(RankingModel):
 
         preds = self.bst.predict(X)
         ranked_indices = np.argsort(preds)[::-1]
-        
+
         return [listings[i] for i in ranked_indices]
