@@ -1,6 +1,6 @@
 from sklearn.model_selection import ParameterGrid
 
-from simple_model_only_lgbm import RunConfig, train_and_eval_lgbm
+from single_lgbm_run import RunConfig, train_and_eval_lgbm
 
 
 def main():
