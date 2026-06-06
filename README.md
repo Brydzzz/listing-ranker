@@ -25,7 +25,7 @@
 ├── data_analysis_final.ipynb # NIE WYSLYAC W ZIP
 ├── extract_ab_data.py # wydzielenie danych zwróconych przez combine_data na test A/B
 ├── IUM - Etap 2 - Raport z procesu budowy modelu.md # raport z procesu budowy modelu z porownaniem wynikow
-├── main.py # FastAPI app
+├── main.py # FastAPI app, uruchomienie `uvicorn main:app`
 ├── pyproject.toml
 ├── README.md
 ├── run_lgbm_experiments_amenitites_on.py # skrypt uruchamiający różne konfigurację z amenitites
@@ -64,12 +64,12 @@
 
 - Endpoint /listings symuluje listingi zwrócone przez silnik wyszukujący, w naszym mikroserwisie zwraca listingi które były w tej samej sesji.
 
-- endpoint /session-event sluzy do logowania wyników testu a/b do późniejszej analizy
+- endpoint /session-event sluży do logowania wyników testu a/b do późniejszej analizy
 
-- użytkownikowi przypisywany jest konkrenty model za pomocą funkcji hashującej
+- użytkownikowi przypisywany jest konkretny model za pomocą funkcji hashującej
 
-- Plik `example_flow.py` pokazuje przykładowe korzystane z mikroserwisu
+- Plik `example_flow.py` pokazuje przykładowe korzystanie z mikroserwisu
 
 - Plik `simulate_ab` generuje syntetyczne wyniki testu ab do analizy przez `ab_analysis.ipynb`
 
-- plik `ab_analysis.ipynb` pozwala na zweryfikowanie kryterium biznesowego poprzez pokazanie średniej dlugości sesji
+- plik `ab_analysis.ipynb` pozwala na zweryfikowanie kryterium biznesowego poprzez pokazanie średniej długości sesji
