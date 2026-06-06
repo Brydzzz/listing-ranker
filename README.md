@@ -68,7 +68,7 @@
 
 - użytkownikowi przypisywany jest konkrenty model za pomocą funkcji hashującej
 
-- Plik `example_flow.py` pokazuje przykładowe korzystane z mikroserwisu.
+- Plik `example_flow.py` pokazuje przykładowe korzystane z mikroserwisu
 
 - Plik `simulate_ab` generuje syntetyczne wyniki testu ab do analizy przez `ab_analysis.ipynb`
 
