@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Header
 from pydantic import BaseModel
 
-from app.ab_router import get_model_for_user
+from app.model_selector import get_model_for_user
 from app.schemas import Listing
 
 router = APIRouter()
