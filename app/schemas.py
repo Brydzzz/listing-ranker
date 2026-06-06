@@ -3,7 +3,6 @@ from pydantic import BaseModel
 
 class Listing(BaseModel):
     listing_id: int
-    booked: int
     session_id: str
     host_since: str
     host_response_rate: float

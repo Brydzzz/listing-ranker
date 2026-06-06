@@ -33,22 +33,18 @@ class SessionEvent(BaseModel):
 @router.post("/session-event")
 def record_session_event(events: list[SessionEvent]):
     file_exists = RESULTS_CSV.exists()
-    listing_dict = event.listing.model_dump()
-
-    row = {"user_uid": event.user_uid, "session_type": event.session_type.value, "ranking_model": event.ranking_model.value, **listing_dict}
-    row.pop("booked", None)
 
     with open(RESULTS_CSV, "a", newline="", encoding="utf-8") as f:
         writer = None
         for event in events:
             listing_dict = event.listing.model_dump()
             row = {"user_uid": event.user_uid, "session_type": event.session_type.value, "ranking_model": event.ranking_model.value, **listing_dict}
-            
+
             if writer is None:
                 writer = csv.DictWriter(f, fieldnames=row.keys())
                 if not file_exists:
                     writer.writeheader()
-            
+
             writer.writerow(row)
 
     return {"status": "ok"}
