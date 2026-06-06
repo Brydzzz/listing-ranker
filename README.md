@@ -62,8 +62,14 @@
 
 ## O mikroserwisie
 
-- [ ] co reprezentuje listings
-- [ ] jak korzystac
-- [ ] zrzuty ekranu moze ze wolania curl na mikroserwis, i ze uruchamia sie go `uvicorn main:app --reload`
-- [ ] opis co ma sie dziac przy example_flow
-- [ ] moze tez chcemy pokazac simulaute_ab? czy to tylko tak chwilowow
+- Endpoint /listings symuluje listingi zwrócone przez silnik wyszukujący, w naszym mikroserwisie zwraca listingi które były w tej samej sesji.
+
+- endpoint /session-event sluzy do logowania wyników testu a/b do późniejszej analizy
+
+- użytkownikowi przypisywany jest konkrenty model za pomocą funkcji hashującej
+
+- Plik `example_flow.py` pokazuje przykładowe korzystane z mikroserwisu.
+
+- Plik `simulate_ab` generuje syntetyczne wyniki testu ab do analizy przez `ab_analysis.ipynb`
+
+- plik `ab_analysis.ipynb` pozwala na zweryfikowanie kryterium biznesowego poprzez pokazanie średniej dlugości sesji
