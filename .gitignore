@@ -12,3 +12,13 @@ wheels/
 # Dane
 *.csv
 dane_archiwa/
+
+# pliki wyjsciowe skryptow
+models_txts/
+*.bin
+*.parquet
+*.pkl
+*.npy
+*.npz
+
+.vscode/
