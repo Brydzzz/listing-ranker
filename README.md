@@ -20,9 +20,11 @@
 ├── combine_data.py # skrypt łączący i przerabiający dane
 ├── extract_ab_data.py # wydzielenie danych zwróconych przez combine_data na test A/B
 ├── IUM - Etap 2 - Raport z procesu budowy modelu.md # raport z procesu budowy modelu z porownaniem wynikow
+├── IUM - Etap 2 - Raport z procesu budowy modelu.pdf # raport w wersji pdf
 ├── main.py # FastAPI app, uruchomienie `uvicorn main:app`
 ├── pyproject.toml
 ├── README.md
+├── README.pdf # ten plik w wersji pdf
 ├── run_lgbm_experiments_amenitites_on.py # skrypt uruchamiający różne konfigurację z amenitites
 ├── run_lgbm_experiments_params.py # skrypt uruchamiający różne konfigurację z parametrów lgbm
 ├── run_lgbm_experiments.py # skrypt uruchamiający różne konfigurację atrybutów
