@@ -1,7 +1,7 @@
 [project]
-name = "ium_projekt"
+name = "listing-ranker"
 version = "0.1.0"
-description = "Add your description here"
+description = "LightGBM ranking of rental listings with an A/B-testing FastAPI service"
 readme = "README.md"
 requires-python = ">=3.11, <3.12"
 dependencies = [

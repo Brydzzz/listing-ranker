@@ -1,79 +1,76 @@
-# Listing Ranker
+# Listing Ranker - rental listing ranking with A/B testing
 
-## Struktura repozytorium
+A LightGBM model that ranks short-term rental listings. The project contains a data preparation pipeline, model experiments, a FastAPI microservice that assigns a model to each user (A/B test), and an analysis of the test results.
+
+> **Note:** This project was created as part of a university course. It simulated working with a client who needs a machine learning solution: from analyzing the business problem and the data, through building and comparing models, to deploying the model in a service and verifying the business criterion with an A/B test.
+
+## Repository structure
 
 ```sh
 .
-├── ab_analysis.ipynb # skrypt do analizy wyników eksperymentu
-├── app # pliki mikroserwisu
-│   ├── example_flow.py # przykładowe wykorzystanie mikroserwisu
+├── ab_analysis.ipynb # notebook analyzing the experiment results
+├── app # microservice files
+│   ├── example_flow.py # example usage of the microservice
 │   ├── __init__.py
-│   ├── listings_router.py # APIRouter do listings
-│   ├── model_selector.py # implementacja consistent hashing do przydzielania modelu
-│   ├── models.py # implementacja inferencji dwoch modeli bazowego i docelowego
-│   ├── rank_router.py # APIRouter do uzyskania porankingownej listy ofert
-│   ├── schemas.py # schemat Listing
-│   └── sessions_router.py # APIRouter do logowania sesji uzytkownika
-├── assets # zdjęcie do dokumentacji
-│   ├── ...
-├── column_embedding.py # skrypt do tworzenia zagnieżdżeń name i description
-├── combine_data.py # skrypt łączący i przerabiający dane
-├── extract_ab_data.py # wydzielenie danych zwróconych przez combine_data na test A/B
-├── IUM - Etap 2 - Raport z procesu budowy modelu.md # raport z procesu budowy modelu z porownaniem wynikow
-├── IUM - Etap 2 - Raport z procesu budowy modelu.pdf # raport w wersji pdf
-├── main.py # FastAPI app, uruchomienie `uvicorn main:app`
+│   ├── listings_router.py # APIRouter for listings
+│   ├── model_selector.py # consistent hashing implementation for assigning a model
+│   ├── models.py # inference for the two models: baseline and target
+│   ├── rank_router.py # APIRouter returning a ranked list of listings
+│   ├── schemas.py # Listing schema
+│   └── sessions_router.py # APIRouter for logging user session events
+├── column_embedding.py # script creating embeddings of name and description
+├── combine_data.py # script that joins and transforms the data
+├── extract_ab_data.py # splits the output of combine_data into A/B test data and the rest
+├── main.py # FastAPI app, run with `uvicorn main:app`
 ├── pyproject.toml
 ├── README.md
-├── README.pdf # ten plik w wersji pdf
-├── run_lgbm_experiments_amenitites_on.py # skrypt uruchamiający różne konfigurację z amenitites
-├── run_lgbm_experiments_params.py # skrypt uruchamiający różne konfigurację z parametrów lgbm
-├── run_lgbm_experiments.py # skrypt uruchamiający różne konfigurację atrybutów
-├── run_log_amen.txt # wyniki run_lgbm_experiments_amenitites_on.py
-├── run_log_params.txt # wyniki run_lgbm_experiments_params.py
-├── run_log.txt # wyniki run_lgbm_experiments.py
-├── single_lgbm_run.py # pojedynczy uruchomienie treningu modelu
-├── simulate_ab.py # skrypt symulający większą ilość danych z a/b
+├── run_lgbm_experiments_amenitites_on.py # runs configurations with different amenities handling
+├── run_lgbm_experiments_params.py # runs configurations with different LightGBM parameters
+├── run_lgbm_experiments.py # runs configurations with different feature sets
+├── single_lgbm_run.py # a single model training run
+├── simple_model_only_tf.py # early prototype: TensorFlow Ranking model (not used by the microservice)
+├── simulate_ab.py # simulates a larger amount of A/B test data
 └── uv.lock
 ```
 
-## Pliki tworzone przez skrypty i potrzebne do skryptów
+## Files produced and required by the scripts
 
 ```sh
 .
-├── combined_ab.parquet # wynik extract_ab_data.py, wykorzystywane w mikroserwisie
-├── combined_no_ab.parquet # wynik extract_ab_data.py, wykorzystywane w single_lgbm_run.py
-├── combined.parquet # wynik combine_data.py
-├── embeddings.npz # zwracany przez column_embedding.py, wykorzystywane w single_lgbm_run.py
-├── eval_dataset.bin # tworzony w trakcie single_lgbm_run, umozliwia ponowne uruchomienie treningu bez potrzeby ponownej budowy lgb.Dataset
-├── lgbm_model_with_feature_names.txt # zapisany model
-├── listing_ids.npy # zwracany przez column_embedding.py, wykorzystywane w single_lgbm_run.py
-├── metadata_cache.pkl # tworzony w trakcie single_lgbm_run, umozliwia ponowne uruchomienie treningu bez potrzeby ponownej budowy lgb.Dataset
-├── results.csv # wyniki mikroserwisu
-├── listings.csv # potrzebne do utworzenia combined.parquet i zagnieżdżeń
-├── sessions.csv # potrzebne do utworzenia combined.parquet
-├── test_data_cache.parquet # tworzony w trakcie single_lgbm_run, umozliwia ponowne uruchomienie treningu bez potrzeby ponownej budowy lgb.Dataset
-└── train_dataset.bin # tworzony w trakcie single_lgbm_run, umozliwia ponowne uruchomienie treningu bez potrzeby ponownej budowy lgb.Dataset
+├── combined_ab.parquet # output of extract_ab_data.py, used by the microservice
+├── combined_no_ab.parquet # output of extract_ab_data.py, used by single_lgbm_run.py
+├── combined.parquet # output of combine_data.py
+├── embeddings.npz # output of column_embedding.py, used by single_lgbm_run.py
+├── eval_dataset.bin # created by single_lgbm_run, allows re-running training without rebuilding the lgb.Dataset
+├── lgbm_model_with_feature_names.txt # saved model
+├── listing_ids.npy # output of column_embedding.py, used by single_lgbm_run.py
+├── metadata_cache.pkl # created by single_lgbm_run, allows re-running training without rebuilding the lgb.Dataset
+├── results.csv # microservice results
+├── listings.csv # required to build combined.parquet and the embeddings
+├── sessions.csv # required to build combined.parquet
+├── test_data_cache.parquet # created by single_lgbm_run, allows re-running training without rebuilding the lgb.Dataset
+└── train_dataset.bin # created by single_lgbm_run, allows re-running training without rebuilding the lgb.Dataset
 ```
 
-## O mikroserwisie
+## About the microservice
 
-- Endpoint /listings symuluje listingi zwrócone przez silnik wyszukujący, w naszym mikroserwisie zwraca listingi które były w tej samej sesji.
+- The `/listings` endpoint simulates listings returned by a search engine
 
-- endpoint /session-event służy do logowania wyników testu a/b do późniejszej analizy
+- The `/session-event` endpoint logs A/B test results for later analysis.
 
-- użytkownikowi przypisywany jest konkretny model za pomocą funkcji hashującej
+- Each user is assigned a specific model using a hash function.
 
-- Plik `example_flow.py` pokazuje przykładowe korzystanie z mikroserwisu
+- `example_flow.py` shows an example of using the microservice.
 
-- Plik `simulate_ab` generuje syntetyczne wyniki testu ab do analizy przez `ab_analysis.ipynb`
+- `simulate_ab.py` generates synthetic A/B test results to be analyzed by `ab_analysis.ipynb`.
 
-- plik `ab_analysis.ipynb` pozwala na zweryfikowanie kryterium biznesowego poprzez pokazanie średniej długości sesji
+- `ab_analysis.ipynb` verifies the business criterion by comparing average session length.
 
-### Przykład użycia - `curl` i analiza w jupyter notebooku
+### Usage example - `curl` and analysis in a Jupyter notebook
 
-#### Start mikroserwisu
+#### Starting the microservice
 
-Najpierw należy uruchomić mikroserwis: `uvicorn main:app`
+First start the microservice: `uvicorn main:app`
 ```bash
 ❯ uvicorn main:app
 INFO:     Started server process [7785]
@@ -82,14 +79,14 @@ INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
 ```
 
-#### Uzyskanie listy ofert symulującej wyniki wyszukiwania:
+#### Getting a list of listings simulating search results
 
 ```bash
 ❯ curl -s http://localhost:8000/listings
 ```
 
 ```json
-# odpowiedź
+# response
 [
     {
         "listing_id":1137096251242024922,
@@ -149,7 +146,7 @@ INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
 ]
 ```
 
-#### Rankowanie wyników wyszukiwania
+#### Ranking search results
 
 ```bash
 ❯ curl -X POST http://localhost:8000/rank \
@@ -214,7 +211,7 @@ INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
 ```
 
 ```json
-# odpowiedź
+# response
 {
     "model_used":"model2",
     "ranked_listings":
@@ -277,7 +274,7 @@ INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
 }
 ```
 
-#### Logowanie eventów sesji użytkownika
+#### Logging user session events
 
 ```bash
 curl -X POST http://localhost:8000/session-event \
@@ -383,26 +380,14 @@ curl -X POST http://localhost:8000/session-event \
 ```
 
 ```json
-# odpowiedź
+# response
 {"status":"ok"}
 ```
 
-**Plik results.csv:**
+**`results.csv` file:**
 ```csv
 user_uid,session_type,ranking_model,listing_id,session_id,host_since,host_response_rate,host_acceptance_rate,host_is_superhost,host_has_profile_pic,host_identity_verified,bathrooms,bedrooms,beds,price,review_scores_rating,review_scores_accuracy,review_scores_cleanliness,review_scores_checkin,review_scores_communication,review_scores_location,review_scores_value,license,instant_bookable,host_response_time,property_type,room_type,amenities
 user_9876,view_listing,model2,553596330972046819,295857ea36653d4efac9c70ad7186cfff4c0237282f1aa6478584441530fa649,2020-09-10,1.0,0.99,True,True,True,1,1,3,238.0,4.77,4.85,4.8,4.97,4.95,4.96,4.85,,True,within an hour,Entire rental unit,Entire home/apt,"['Kitchen', 'Wifi', 'Hot water', 'TV', 'Air conditioning', 'Dishes and silverware', 'Bed linens', 'Cooking basics', 'Microwave', 'Essentials', 'Elevator', 'Refrigerator', 'Dedicated workspace', 'Washer', 'Room-darkening shades', 'Drying rack for clothing', 'Stove', 'Oven', 'Toaster', 'Clothing storage', 'Smoking allowed']"
 user_9876,view_listing,model2,1137096251242024922,295857ea36653d4efac9c70ad7186cfff4c0237282f1aa6478584441530fa649,2023-10-21,1.0,0.91,True,True,False,1,1,1,266.0,4.5,4.75,4.5,5.0,5.0,5.0,4.25,,True,within an hour,Entire rental unit,Entire home/apt,"['Kitchen', 'Wifi', 'Hot water', 'TV', 'Dishes and silverware', 'Bed linens', 'Hangers', 'Cooking basics', 'Microwave', 'Essentials', 'Elevator', 'Refrigerator', 'Dedicated workspace', 'Hair dryer', 'Self check-in', 'Drying rack for clothing', 'Blender', 'Laundromat nearby', 'Body soap', 'Luggage dropoff allowed', 'Shampoo', 'AC - split type ductless system', 'Building staff', 'Outdoor dining area', 'Ethernet connection', 'Shared beach access', 'Outdoor furniture', 'Patio or balcony', 'Window guards', 'Other gas stove', 'Shared gym in building']"
 user_9876,book_listing,model2,553596330972046819,295857ea36653d4efac9c70ad7186cfff4c0237282f1aa6478584441530fa649,2020-09-10,1.0,0.99,True,True,True,1,1,3,238.0,4.77,4.85,4.8,4.97,4.95,4.96,4.85,,True,within an hour,Entire rental unit,Entire home/apt,"['Kitchen', 'Wifi', 'Hot water', 'TV', 'Air conditioning', 'Dishes and silverware', 'Bed linens', 'Cooking basics', 'Microwave', 'Essentials', 'Elevator', 'Refrigerator', 'Dedicated workspace', 'Washer', 'Room-darkening shades', 'Drying rack for clothing', 'Stove', 'Oven', 'Toaster', 'Clothing storage', 'Smoking allowed']"
 ```
-
-**Analiza `results.csv` w `ab_analysis.ipynb`**
-
-![wyniki ipynb curl example](assets/curl_results.png)
-
-### Wyniki `ab_analysis.ipynb` dla `example_flow.py`
-
-![wyniki ipynb exmaple_flow](assets/exmaple_flow_results.png)
-
-### Wyniki `ab_analysis.ipyb` dla `simulate_ab.py`
-
-![wyniki ipynb simualte ab](assets/simulate_ab_results.png)

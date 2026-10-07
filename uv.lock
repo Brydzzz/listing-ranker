@@ -866,7 +866,7 @@ wheels = [
 ]
 
 [[package]]
-name = "ium-projekt"
+name = "listing-ranker"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
